@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 import json
 import os
 import cv2
+import pickle
 
 from PIL import Image
 from skimage.feature import hog
@@ -34,9 +35,12 @@ if os.environ.get('DISPLAY','') == '':
     print('no display found. Using non-interactive Agg backend')
     mpl.use('Agg')
 
-# 101 is main dataset, 102 is for testing
+# 101 is main dataset, 102 is for testing with smaller dataset
 parent_dir = "/mnt/c/Users/nhmin/Downloads/food-101/"
 bin_n = 16 # Number of bin
+project_dir = os.getcwd()
+model_dir = "/mnt/c/Users/nhmin/Downloads/"
+class_label = ["pad_thai", "pho", "ramen", "spaghetti_bolognese", "spaghetti_carbonara"]
 # svm_params = dict(kernel_type= cv2.SVM_LINEAR, svm_type=cv2.SVM_C_SVC, C=2.67, gamma=5.383)
 
 def get_image(path):
@@ -45,45 +49,14 @@ def get_image(path):
     resized_image = img.resize((384,384), Image.ANTIALIAS)
     return np.array(resized_image)
 
-# Currently testing to get features
-# def load_train_data():
-#     final_data = dict()
-#     # Load in json file to create dictionary: key = class label; value = file path
-#     fileName = parent_dir + "/meta/train.json"
-#     with open(fileName, 'r') as file:
-#         data = json.load(file)
-#     # get label list
-#     labels = list(data.keys())
-#     file_image = get_image(parent_dir + "images/" + data.get(labels[0])[0])
-#     orb = cv2.ORB()
-
-#     kp = orb.detect(file_image, None)
-#     kp, des = orb.compute(file_image, kp)
-#     print(kp)
-#     print("==================")
-#     print(des)
 
 def load_json(path):
     final_data = dict()
     # Load in json file to create dictionary: key = class label; value = file path
     with open(path, 'r') as file:
         data = json.load(file)
-    return data
-
-
-def load_data(data):
-    final_data = dict()
-    # get label list
-    labels = list(data.keys())
-    for label in labels:
-        final_data.setdefault(label, [])
-        for image in data.get(label):
-            file_name = image.split('/')[1]
-            file_image = get_image(parent_dir + "images/" + image)
-            # given 32x32 cell
-            image_feature, image_hog = hog(file_image, orientations=8, pixels_per_cell=(16, 16),
-                    cells_per_block=(8, 8), block_norm = 'L2-Hys', visualize=True, multichannel=True)
-            final_data.get(label).append([file_name, image_feature])
+    for label in class_label:
+        final_data.update({label : data.get(label)})
     return final_data
 
 def load_HOG_data(data):
@@ -97,10 +70,10 @@ def load_HOG_data(data):
             feature_lists.append(image_feature)
     return np.array(feature_lists)
 
-def label_processing(data, label_dict):
+def label_processing(data, label_dictionary):
     final_label = []
-    for i in label_dict.keys():
-        label_value = label_dict.get(i)
+    for i in label_dictionary.keys():
+        label_value = label_dictionary.get(i)
         for image in data.get(i):
             final_label.append(label_value)
     return np.array(final_label)
@@ -113,45 +86,104 @@ def feature_format(data):
     food_pca = ss.fit_transform(food_stand)
     return food_pca
 
+def pre_process_data(data_json):
+    pca_data = dict()
+    labels = list(data_json.keys())
+    for label in labels:
+        pca_data.update({label : feature_format(data_json.get(label))})
+    return pca_data
+
+def train_dataset(train_json):
+    # Getting all the label and combination of all label
+    labels = list(train_json.keys())
+    class_combinations = list(combinations(labels, 2))
+
+    #Get all pca dictinary data for both train and test
+    train_pca_dict = pre_process_data(train_json)
+    for combination in class_combinations:
+        #SVM classification
+        svm = SVC(gamma='auto', kernel='linear', probability=True)
+        combine_train_data = np.vstack((train_pca_dict.get(combination[0]), train_pca_dict.get(combination[1])))
+        label_dict = {combination[0] : 1, combination[1] : -1}
+        label_lists_train = label_processing(train_json, label_dict)
+
+        x_train = pd.DataFrame(combine_train_data)
+        y_train = pd.Series(label_lists_train)
+
+        svm.fit(x_train, y_train)
+        filename = combination[0] + "_" + combination[1] + "_model.sav"
+        model_filename = model_dir + "/models_save/" + filename
+        pickle.dump(svm, open(model_filename, 'wb'))
+def test_dataset(test_json):
+    # Getting all the label and combination of all label
+    labels = list(test_json.keys())
+    class_combinations = list(combinations(labels, 2))
+    #Get all pca dictinary data for both train and test
+    test_pca_dict = pre_process_data(test_json)
+
+    for combination in class_combinations:
+        # load in SVM model
+        filename = combination[0] + "_" + combination[1] + "_model.sav"
+        loaded_model = pickle.load(open(model_dir + filename, 'rb'))
+        combine_test_data = np.vstack((test_pca_dict.get(combination[0]), test_pca_dict.get(combination[1])))
+        label_dict = {combination[0] : 1, combination[1] : -1}
+        label_lists_test = label_processing(test_json, label_dict)
+
+        x_test = pd.DataFrame(combine_test_data)
+        y_test = pd.Series(label_lists_test)
+
+        accuracy = loaded_model.score(x_test, y_test)
+        y_pred = loaded_model.predict(x_text)
+        print(combination)
+        print("Test accuracy: " + accuracy)
+        print("Test set prediction: " + y_pred)
+
+
 def main():
     # Compute both train and test data
     # load json file
     train_json = load_json(parent_dir + "/meta/train.json")
     test_json = load_json(parent_dir + "/meta/test.json")
 
-    # Getting all the label
-    labels = list(train_json.keys())
-    class_combinations = list(combinations(labels, 2))
+    train_dataset(test_json)
+    test_dataset(test_json)
 
-    # for combination in class_combination:
-    #     class1 = load_HOG_data(train_json.get(combination[0]))
-    #     class2 = load_HOG_data(train_json.get(combination[1]))
+    # Getting all the label and combination of all label
+    # labels = list(train_json.keys())
+    # class_combinations = list(combinations(labels, 2))
+    # #Get all pca dictinary data for both train and test
+    # train_pca_dict = pre_process_data(train_json)
+    # test_pca_dict = pre_process_data(test_json)
 
-    # testing code
-    combine_data_train = train_json.get(class_combinations[0][0]) + train_json.get(class_combinations[0][1])
-    combine_data_test = test_json.get(class_combinations[0][0]) + test_json.get(class_combinations[0][1])
-    label_dict = {class_combinations[0][0] : 1, class_combinations[0][1] : -1}
-    train_pca = feature_format(combine_data_train)
-    test_pca = feature_format(combine_data_test)
+    # for combination in class_combinations:
+    #     print(combination)
+    #     #SVM classification
+    #     svm = SVC(C=2.67,gamma='auto', kernel='linear', probability=True)
+    #     combine_train_data = np.vstack((train_pca_dict.get(combination[0]), train_pca_dict.get(combination[1])))
+    #     print(combine_train_data)
+    #     print(combine_train_data.shape)
+    #     combine_test_data = np.vstack((test_pca_dict.get(combination[0]), test_pca_dict.get(combination[1])))
+    #     label_dict = {combination[0] : 1, combination[1] : -1}
+    #     label_lists_train = label_processing(train_json, label_dict)
+    #     label_lists_test = label_processing(test_json, label_dict)
 
-    label_lists_train = label_processing(train_json, label_dict)
-    label_lists_test = label_processing(test_json, label_dict)
+    #     x_train = pd.DataFrame(combine_train_data)
+    #     y_train = pd.Series(label_lists_train)
 
-    X_Train = pd.DataFrame(train_pca)
-    Y_Train = pd.Series(label_lists_train)
+    #     x_test = pd.DataFrame(combine_test_data)
+    #     y_test = pd.Series(label_lists_test)
 
-    X_Test = pd.DataFrame(test_pca)
-    Y_Test = pd.Series(label_lists_test)
+    #     svm.fit(x_train, y_train)
+    #     filename = combination[0] + "_" + combination[1] + "_model.sav"
+    #     model_filename = model_dir + "/models_save/" + filename
+    #     pickle.dump(svm, open(model_filename, 'wb'))
 
-    #SVM classification
-    svm = SVC(kernel='linear', probability=True)
-    svm.fit(X_Train, Y_Train)
+    #     y_pred = svm.predict(x_test)
+    #     #calculate accuracy
+    #     accuracy = accuracy_score(y_test, y_pred)
+    #     print(combination)
+    #     print("Model accuracy: ", accuracy)
 
-    Y_pred = svm.predict(X_Test)
-
-    # Calculate accuracy
-    accuracy = accuracy_score(Y_Test, Y_pred)
-    print("Model accuracy: ", accuracy)
 
 
 if __name__ == '__main__':
