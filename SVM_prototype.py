@@ -43,7 +43,7 @@ if os.environ.get('DISPLAY','') == '':
     mpl.use('Agg')
 
 # 101 is main dataset, 102 is for testing with smaller dataset
-parent_dir = "/mnt/c/Users/nhmin/Downloads/food-101/"
+parent_dir = "/mnt/c/Users/nhmin/Downloads/food-103"
 bin_n = 16 # Number of bin
 project_dir = os.getcwd()
 model_dir = "/mnt/c/Users/nhmin/Downloads/"
@@ -54,7 +54,7 @@ class_label = {"pad_thai" : 0, "pho" : 1, "ramen" : 2, "spaghetti_bolognese" : 3
 def get_image(path):
     # image resize to 384x384
     img = Image.open(path + ".jpg")
-    resized_image = img.resize((128,128), Image.ANTIALIAS)
+    resized_image = img.resize((227,227), Image.ANTIALIAS)
     return np.array(resized_image)
 
 
@@ -69,7 +69,7 @@ def load_json(path):
     return final_data
 
 def HOG_image(image):
-    np_image = get_image(parent_dir + "images/" + image)
+    np_image = get_image(parent_dir + "/images/" + image)
     # given 32x32 cell
     image_feature, image_hog = hog(np_image, orientations=8, pixels_per_cell=(8, 8),
         cells_per_block=(8, 8), block_norm = 'L2-Hys', visualize=True, multichannel=True)
@@ -79,7 +79,7 @@ def pca_transform(image):
     ss = StandardScaler()
     image_ss = ss.fit_transform(image)
     # Keep 90% of variance
-    pca = PCA(0.85)
+    pca = PCA(0.9)
     image_pca = pca.fit_transform(image_ss)
     return image_pca
 
@@ -88,26 +88,26 @@ def get_key(val):
         if(val == value): return key
     return None
 
-def load_train_data():
-    with h5py.File(model_dir + '227-imgsz-32-bsz-0.01-lr-30-ep.ckpt.02-1.64.hdf5', 'r') as f:
-        print(f.keys())
-        data = f['model_weights']
-        for name in data:
-            print(name)
-        print(data['max_pooling2d_18'])
-        # print(data.shape)
-        # print(data.dtype)
-        # print(f['model_weights'][0])
-        # print("===============")
-        # print(f['optimizer_weights'])
+# def load_train_data():
+#     with h5py.File(model_dir + '227-imgsz-32-bsz-0.01-lr-30-ep.ckpt.02-1.64.hdf5', 'r') as f:
+#         print(f.keys())
+#         data = f['model_weights']
+#         for name in data:
+#             print(name)
+#         print(data['max_pooling2d_18'])
+#         # print(data.shape)
+#         # print(data.dtype)
+#         # print(f['model_weights'][0])
+#         # print("===============")
+#         # print(f['optimizer_weights'])
 
 def training():
     # load json file
     train_json = load_json(parent_dir + "/meta/train.json")
 
     # Getting all the label and combination of all label
-    labels = list(train_json.keys())
-    class_combinations = list(combinations(labels, 2))
+    # labels = list(train_json.keys())
+    # class_combinations = list(combinations(labels, 2))
 
     # Create all train data after HOG
     train_image = []
@@ -115,13 +115,15 @@ def training():
     train_label = []
     for label in train_json.keys():
         for img in train_json.get(label):
-            train_image.append(img.split('/')[1])
-            train_label.append(class_label.get(label))
+            # train_image.append(img.split('/')[1])
+            # train_label.append(class_label.get(label))
             train_data.append(HOG_image(img))
     # Applying PCA 
     train_pca = pca_transform(train_data)
-    train_model = svm_train(train_label, train_data, '-s 0 -t 0 -c 2.3 -b 1')
-    svm_save_model('all_food_classification.model', train_model)
+    print(len(train_data[1]))
+    print(train_pca.shape)
+    # train_model = svm_train(train_label, train_data, '-s 0 -t 0 -c 2.3 -b 1')
+    # svm_save_model('all_food_classification.model', train_model)
     
 
 def testing():
@@ -178,8 +180,8 @@ def single_test(image_path):
 #     return np.array(np.reshape(temp_img, (img_shape[0],img_shape[1]))).ravel()
 
 def main():
-    load_train_data()
-    #training()
+    #load_train_data()
+    training()
     print("model training is finished")
     #testing()
     #print("Single image test.")
