@@ -1,0 +1,2 @@
+In this folder contains every iteration of the fine-tuning process modeling off of AlexNet architecture. 
+File "iter32_to_iter39_bestmodel" contains the model with the best validation accuracy and loss.
